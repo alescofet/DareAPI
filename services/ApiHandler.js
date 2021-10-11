@@ -9,6 +9,11 @@ class InsuranceApi {
 
   postLogin = (data) => this.api.post(`/login`, data);
 
+  getClients = (token) => this.api.get(`/clients`, {headers:{Authorization: `${token.type} ${token.token}`}});
+
+  getPolicies = (token) => this.api.get(`/policies`, {headers:{Authorization: `${token.type} ${token.token}`}});
+
+
 }
 
 
