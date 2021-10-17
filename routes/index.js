@@ -233,7 +233,7 @@ router.post("/api/login", (req,res)=>{
    console.log("res inicial", res.statusCode);
    
     
-      insuranceApi.getClients(insuranceApi.token)
+      insuranceApi.getClients()
         .then((clients) => {        
           console.log("res final", res.statusCode)
           res.json(clients.data);
@@ -249,7 +249,7 @@ router.post("/api/login", (req,res)=>{
 
 
 router.get('/api/policies', (req, res) => {
-      insuranceApi.getPolicies(insuranceApi.token)
+      insuranceApi.getPolicies()
         .then((policies) => {
           res.status(200).json(policies.data);
         })
