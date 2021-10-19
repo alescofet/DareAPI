@@ -1,7 +1,15 @@
 const router = require('express').Router();
 const axios = require('axios');
 const InsuranceApi = require('../services/ApiHandler');
-const jwt = require("jsonwebtoken")
+const jwt = require("jsonwebtoken");
+const { isAuthenticated } = require('../middleware/jwt.middleware');
+
+let cache = {}
+
+const getToken = (()=>{
+  return jwt.decode(cache.token)
+})
+
 
 
 const insuranceApi = new InsuranceApi();
@@ -31,26 +39,83 @@ insuranceApi.api.interceptors.response.use((response) => {
 
 router.post("/login", (req,res)=>{
   const {username, password} = req.body
+
+  callApiLogin()
+  try {
+    
+    setTimeout(() => {
+      insuranceApi.getClients()
+      .then((usersList)=>{
+        let user = usersList.data.filter((user)=>{
+          return user.email === username
+        })
+        user = user[0]
+        
+          if (!user) {
+            // If the user is not found, send an error response
+            res.status(401).json({ message: 'User not found.' })
+            return
+          }
+    
+          // Compare the provided password with the one saved in the database
+          const passwordCorrect = user.id === password
+    
+          if (passwordCorrect) {
+            // Deconstruct the user object to omit the password
+            const { id, email, name, role } = user
+    
+            // Create an object that will be set as the token payload
+            const payload = { id, email, name, role }
+    
+            // Create and sign the token
+            const authToken = jwt.sign(
+              payload,
+              process.env.TOKEN_SECRET || 'capGemini',
+              {
+                //remember to create a .env and move the secret there
+                algorithm: 'HS256',
+                expiresIn: '6h',
+              },
+            )
+    
+            // Send the token as the response 
+             
+              cache.token = authToken
+              const decodedToken = jwt.decode(cache.token)
+             
+              
   
-  insuranceApi.getClients()
-  .then((result)=>{
-  const loggedUser = result.data.find((user)=>{return user.email === username})
-  insuranceApi.user = loggedUser
-  res.status(200).json(loggedUser)
+            res.status(200).json({ token: cache.token, type: "Bearer", expires_in: (decodedToken.exp - decodedToken.iat) })
+          } else {
+            res.status(401).json({ message: 'Unable to authenticate the user' })
+          }
+      })
+      .catch((err)=>{
+        console.log(err);
+        
+        res.status(401).json(err)
+      })
+    }, 500);
+  } catch (error) {
+    console.log(error);
+    
+  }
+  
   })
-  .catch((err)=>{
-  res.status(401).json(err)
-  })
 
 
-})
 
-router.get("/policies", (req,res)=>{
+
+router.get("/policies", /* isAuthenticated, */ (req,res)=>{
+  req.header.authorization = `Bearer: ${cache.token}`
+
+  const user = getToken()
+  
   let {limit} = req.query
   if (!limit){limit = 10}
   insuranceApi.getPolicies()
   .then((policies)=>{
-    if(insuranceApi.user?.role === "admin"){
+    if(user.role === "admin"){
       const policyInfo=policies.data.slice(0,limit)
       policyInfo.forEach((policy)=>{
         delete policy.clientId
@@ -59,7 +124,7 @@ router.get("/policies", (req,res)=>{
       
     }else{
       const policyInfo = policies.data.filter((policy)=>{
-       return policy.email === insuranceApi.user?.email
+       return policy.email === user.email
       })
       policyInfo.forEach((policy)=>{
         delete policy.clientId
@@ -74,18 +139,21 @@ router.get("/policies", (req,res)=>{
   
 })
 
-router.get("/policies/:id", (req,res)=>{
+router.get("/policies/:id", /* isAuthenticated, */ (req,res)=>{
   const {id} = req.params
+
+  const user = getToken()
+
   insuranceApi.getClients()
   .then((clients)=>{
-    if(insuranceApi.user?.role === "admin"){
+    if(user.role === "admin"){
       const userInfo = clients.data.filter((client)=>{
        return client.id === id
       })
       res.json(userInfo)
     } else{
       const userInfo = clients.data.filter((client)=>{
-        return client.id === insuranceApi.user?.id
+        return client.email === user.email
       })
       res.json(userInfo)
     }
@@ -97,14 +165,17 @@ router.get("/policies/:id", (req,res)=>{
   
 })
 
-router.get("/clients", (req,res)=>{
+router.get("/clients", /* isAuthenticated, */ (req,res)=>{
   let {limit,name} = req.query
+ 
+  const user = getToken()
+  
   if (!limit){limit = 10}
   insuranceApi.getClients()
   .then((clients)=>{
     insuranceApi.getPolicies()
     .then((policies)=>{
-      if(insuranceApi.user?.role === "admin"){
+      if(user.role === "admin"){
         if(name){
           const filteredClients = clients.data.filter((client)=>{
             return client.name.toLowerCase() === name.toLowerCase()
@@ -137,7 +208,7 @@ router.get("/clients", (req,res)=>{
         
       }else{
         const userInfo = clients.data.filter((client)=>{
-         return client.email === insuranceApi.user?.email
+         return client.email === user.email
         })
         filteredPolicies = policies.data.filter((policy)=>{
           return policy.clientId === userInfo.id
@@ -165,18 +236,18 @@ router.get("/clients", (req,res)=>{
     
 })
 
-router.get("/clients/:id", (req,res)=>{
+router.get("/clients/:id", /* isAuthenticated, */ (req,res)=>{
   const {id} = req.params
   insuranceApi.getClients()
   .then((clients)=>{
-    if(insuranceApi.user?.role === "admin"){
+    if(user.role === "admin"){
       const userInfo = clients.data.filter((client)=>{
        return client.id === id
       })
       res.json(userInfo)
     } else{
       const userInfo = clients.data.filter((client)=>{
-        return client.id === insuranceApi.user?.id
+        return client.id === user.id
       })
       res.json(userInfo)
     }
@@ -188,18 +259,21 @@ router.get("/clients/:id", (req,res)=>{
   
 })
 
-router.get("/clients/:id/policies", (req,res)=>{
+router.get("/clients/:id/policies", /* isAuthenticated, */ (req,res)=>{
   const {id} = req.params
+
+  const user = getToken()
+
   insuranceApi.getPolicies()
   .then((policies)=>{
-    if(insuranceApi.user?.role === "admin"){
+    if(user.role === "admin"){
       const policyInfo = policies.data.filter((policy)=>{
        return policy.clientId === id
       })
       res.json(policyInfo)
     } else{
       const policyInfo = policies.data.filter((policy)=>{
-        return policy.clientId === insuranceApi.user?.id
+        return policy.clientId === user?.id
       })
       res.json(policyInfo)
     }
@@ -211,7 +285,7 @@ router.get("/clients/:id/policies", (req,res)=>{
   
 })
 
-router.post("/api/login", (req,res)=>{
+const apiLogin = (()=>{
   insuranceApi.postLogin(myCredentials)
   .then((response)=>{
     const decodedToken = (jwt.decode(response.data.token))
@@ -219,7 +293,7 @@ router.post("/api/login", (req,res)=>{
     console.log(decodedToken.exp);
 
     insuranceApi.api.defaults.headers.common['Authorization'] = 'Bearer ' + response.data.token;
-    res.status(200).json(response.data)
+    return(response.data.token)
     
   })
   .catch((err)=>{
@@ -227,6 +301,11 @@ router.post("/api/login", (req,res)=>{
   })
   
 })
+
+async function callApiLogin(){
+  await apiLogin()
+}
+
 
  router.get('/api/clients', (req, res) => {
    console.log("CLIENT");
